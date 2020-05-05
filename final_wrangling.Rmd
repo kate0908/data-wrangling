@@ -1,0 +1,338 @@
+---
+title: "final project"
+author: "Anyang Lu"
+date: "5/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,warning=FALSE)
+```
+
+
+
+1.Introduction
+
+
+  Nowadays, many people have begun to adopt pets, which can not only eliminate loneliness but also cultivate friendships between humans and animals. In the United States, many shelters and rescues have adopted stray dogs or some families have donated puppies that they cannot raise. On the website, like PetFinder,  everyone can browse the information of these adoptable dogs. For families who are interested in adoption, through some simple websites For information, you can contact the foster home to adopt your own dog. Data we  use in the project have already been scrapped from the website and collected in Github. By wrangling the data, I will show some visualized results in the report.
+
+```{r include =FALSE}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(repurrrsive)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(tidytext)
+library(rvest)
+library(magrittr)
+library(ggpubr)
+library(raster)
+library(choroplethr)
+library(wordcloud)
+library(cowplot)
+library(gridExtra)
+```
+
+
+
+2. Data Description
+ 
+  This is data about adoptable dogs in each of the US states and the District of Columbia. The main information on the three datasets in adoptable dogs are shown below: 
+
+
+2.1 allDogDescriptions.csv: 
+
+  This file is collected from the PetFinder API for all adoptable dogs in each state posted by  September 20, 2019. There are 58,180 rows, 36 columns in this dataset. Each row represents an individual adoptable dog in the US. Each row contains basic information about the adoptable dog, like age, sex, size, breed and etc.. Each dog has a unique ID number.
+  
+```{r}
+# import data 
+raw_des <- read_csv("allDogDescriptions.csv")
+des <- data.frame(raw_des)
+
+```
+
+
+2.2 dogTravel.csv: 
+
+  This file aims to show where those dogs are available and where they came from. There are 2,460 rows,  8 columns in this dataset. Each row represents a single dog that was available adoption somewhere in the US. Each of these dogs is described as having been moved from another location to their current location, mainly contain the state, city, zip code, and detailed description of the dogs.
+
+```{r}
+# import data
+raw_travel <- read_csv("dogTravel.csv")
+travel <- data.frame(raw_travel)
+
+```
+
+
+2.3 movesByLocation.csv:
+
+  This file finds the total numbers of imports and exports for each location. There are 5 columns, 90 rows in this dataset. Each row represents how many adopted dogs are exported or imported in a specific US state or country.
+	
+```{r}
+# import data
+raw_move <- read_csv("movesByLocation.csv")
+move <- data.frame(raw_move)
+
+```
+
+
+
+
+
+3.Data Wrangling
+
+3.1 Data Wrangling in allDogDescriptions
+
+  Dataset allDogDescriptions list basic information on every adopted dog. For example, considering age, sex, and size, we rank the number of adopted dogs of different ages, sex and size and draw a bar plot of the result. Dogs that are the most in the shelter or rescue are female, adult, and in medium size. And the male, adult in medium size dogs rank the second largest population in the adopted dogs.
+  
+```{r}
+
+
+# to see how many dogs in different age, sex, and size, then rank by the number of the dogs
+group <- des %>%
+  group_by(age,sex,size) %>%
+  count() %>%
+  arrange(desc(n))
+
+```
+
+```{r}
+#plot the bar chart
+basic_des <- data.frame(paste(group$age,group$sex,group$size))
+groupdf <- cbind(basic_des,group$n)
+colnames(groupdf) <- c('basic_des','n')
+
+
+ggplot(groupdf, mapping=aes(x=basic_des,y=n))+
+  geom_bar(stat="identity",width=0.5, color='red',fill='steelblue')+
+  geom_text(aes(label=n), vjust=1.6, color="black", size=2)+
+  theme_minimal()
+# Adult	Female	Medium	7246
+```
+
+  
+  Only considering age and sex aspects, ggplot perform a dodge-position bar plot and a stack-position bar plot in this case. In general, among the adoptable dogs, adult dogs and young dogs are common than dogs in other ages. And male dogs are more than female dogs.
+
+  
+```{r}
+# the bar plot of age in different sex
+new_group <- des %>%
+  filter(sex != 'Unknown') %>%
+  group_by(age,sex) 
+
+# stacked position
+p1 <- ggplot(new_group, mapping=aes(x=age,fill=sex))+
+  geom_bar(stat="count",width=0.5,position='dodge')+
+  scale_fill_manual(values=c('#999999','#E69F00'))+
+  geom_text(stat='count',aes(label=..count..),color="black",size=3.5,position=position_dodge(0.5),
+            vjust=-0.5)+
+  theme_minimal()
+
+# stacked position
+p2 <- ggplot(data=new_group, mapping=aes(x=age,fill=sex))+
+  geom_bar(stat="count",width=0.5,position='stack')+
+  scale_fill_manual(values=c('#999999','#E69F00'))+
+  geom_text(stat='count',aes(label=..count..), color="white", size=3.5,position=position_stack(0.5))+
+  theme_minimal()
+
+grid.arrange(p1,p2,ncol=2,nrow=1)
+```
+
+
+
+  Spread() function allows the table spread sex(the key-value pair) across multiple columns. In this case, numbers in the table represent the number of adopted dogs according to the row value and column value.
+
+```{r}
+# seperate the sex column
+new_group1 <- des %>%
+  filter(sex != 'Unknown') %>%
+  group_by(age,sex) %>%
+  count() %>%
+  spread(sex,n)
+head(data.frame(new_group1))
+
+```
+
+
+
+   As far as all the states in the US are concerned, a choropleth map performs better-visualized sights when it comes to the number of adopted dogs in the states.
+
+  
+```{r}
+# plot the state choropleth of the adoptable dogs in US
+statecount <- des %>%
+  filter(contact_country == 'US') %>%
+  group_by(contact_state) %>%
+  count()
+colnames(statecount) <- c('region','value')
+
+statename <- c('alaska','alabama','arkansas','arizona','california','colorado','connecticut',	'district of columbia','delaware','florida','georgia','hawaii','iowa','idaho','illinois','indiana','kansas','kentucky','louisiana','massachusetts','maryland','maine','michigan','minnesota','missouri','mississippi','montana','north carolina','north dakota','nebraska','new hampshire','new jersey','new mexico','nevada','new york','ohio','oklahoma','oregon','pennsylvania','rhode island','south carolina','south dakota','tennessee','texas','utah','virginia','vermont','washington','wisconsin','west virginia','wyoming')
+
+for (i in (1:nrow(statecount))){
+  statecount[i,1] = statename[i]}
+
+statecount <- data.frame(statecount) %>%
+  arrange(statecount$region)
+state_choropleth(statecount,title  = "Adoptable Dogs in US",legend = "the number of adoptable dogs")
+
+
+
+```
+
+3.2 Data Wrangling in dogTravel
+
+  
+  Dataset dogTravel lists the information about the location and a detailed description about the adopted dogs. To extract the text from the column 'description', we use unnest_tokens() function. There are 2106372 words in the text from 'description'. After removing the stop_words, word cloud about the text shows us the top words in the description. 
+  
+  
+```{r}
+# the most frequent words in description
+text <- matrix(NA, nrow = nrow(raw_travel),ncol = 1)
+for (i in (1:nrow(raw_travel))){
+  text[i,1] = as.character(raw_travel[i,4])
+}
+text <- tibble(text)
+text <- text %>% unnest_tokens(word, text )
+
+
+data(stop_words)
+topwords <- text %>% 
+  anti_join(stop_words) %>%
+  count(word, sort = TRUE)
+head(topwords)
+topwords %>% with(wordcloud(word,n, max.words = 100,random.order=FALSE,colors="steelblue"))
+
+```
+
+
+
+3.3 Data Wrangling in movesByLocation
+
+  
+  	Dataset movesByLocation lists the information about the number of exported, imported adopted dogs in a specific US state or country. After reading the data, we assign NA equal to 0 in this dataset.
+
+
+```{r}
+move <- data.frame(raw_move)
+# omit NA by assigning it as 0
+for (i in (1:nrow(move))){
+  for (j in (1:ncol(move))){
+    if (is.na(move[i,j]) == TRUE){
+      move[i,j] = 0
+    }
+  }
+}
+
+head(move)
+```
+
+
+  
+  State choropleth map of the exported adopted dogs and imported adopted dogs are shown as below. Among the states, Tennessee is the largest exporter and New Mexico is the largest importer. So maybe people in New Mexico, Virginia, New Hampshire are more likely to adopt a dog in their family.
+
+    
+```{r}
+# plot the state choropleth of the exported dogs in US
+InUS <- move %>%
+  filter(inUS == TRUE) %>%
+  arrange(location)
+
+export <- InUS %>%
+  dplyr::select(location,exported) 
+
+colnames(export) <- c('region','value')
+
+for (i in (1:nrow(export))){
+  export[i,1] = statecount[i,1]}
+
+state_choropleth(export,title  = "Exported Dogs in US",legend = "the number of exported dogs")
+
+
+```
+
+```{r}
+# plot the state choropleth of the imported dogs in US
+import <- InUS %>%
+  dplyr::select(location,imported) 
+
+colnames(import) <- c('region','value')
+
+for (i in (1:nrow(import))){
+  import[i,1] = statecount[i,1]}
+
+state_choropleth(import,title  = "Imported Dogs in US",legend = "the number of imported dogs")
+```
+
+```{r}
+# rank by the total number of adopted dogs
+total <- InUS %>%
+  arrange(desc(total))
+
+```
+
+
+
+3.4 Join Dataset
+
+
+  Because each dog has a unique ID number, we inner join the dataset allDogDescriptions and dogTravel by the key 'id'. After inner join, there are 6194 rows of the new dataset and we add 'dogTravel$found' in the new dataset, which represents where the dog was found.
+
+    
+```{r}
+# add found by inner_join 
+travel <- data.frame(raw_travel)
+joindat <- des %>% 
+  inner_join(travel, by = "id", copy=FALSE)
+```
+
+
+```{r}
+#find top words in tags
+joindat$tags <- tolower(joindat$tags)
+tags <- tibble(joindat$tags)
+tags <- tags %>% unnest_tokens(word, joindat$tags )
+tags <- na.omit(tags)
+
+tags <- tags %>%
+  anti_join(stop_words) %>%
+  group_by(word) %>%
+  count() %>%
+  arrange(desc(n))
+
+wordcloud2(tags, size = 2, minRotation = -pi/2, maxRotation = -pi/2)
+
+tags %>%
+  filter(n >= 70)%>%  
+  ggplot(aes(word, n))+geom_bar(stat = "identity")+xlab(NULL)+ coord_flip()
+
+  
+```
+
+    
+    
+  In the new dataset, the column 'posted' are in the same format as that in the dataset allDogDescriptions. If we want to count how many adopted dogs are posted on the PetFinder API every year, separate the 'posted' into 'year' and 'others', then group by 'year' and we may get the result. Here is a line plot to directly show the result.
+
+
+```{r}
+jointime <- joindat %>%
+  separate(posted,c('year','month'),sep='-')
+jointime <- jointime %>%
+  group_by(year) %>%
+  count() %>%
+  arrange(desc(n))
+
+jointime <- jointime %>%
+  filter(str_detect(year,'^2'))
+head(data.frame(jointime))
+
+ggplot(jointime, mapping = aes(x=year, y=n,group=1))+
+  geom_line(linetype="dashed", color="blue", size=1.2)+
+  geom_point(color="red", size=3) +
+  geom_text(aes(label=n), vjust=1.6, color="black", size=4)+
+  labs(title="The Number of Adopted Dogs by Year",x="n", y = "year")
+
+```
+
+
